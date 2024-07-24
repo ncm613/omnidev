@@ -1,0 +1,66 @@
+# this file should only be editted from sf_template_repo
+name: "Setup Initial SF Project"
+on:
+  create:
+  workflow_dispatch:
+
+jobs:
+  setupProject:
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout repo'
+        uses: actions/checkout@v4
+      - name: Install Salesforce CLI
+        shell: bash
+        run: |
+          npm install -g @salesforce/cli
+          sf --version
+          
+      - name: "Create sf project"
+        run: |
+          sf project generate --name ${{ github.event.repository.name }} --output-dir ../
+          rm -R scripts
+          # TODO delete extra files
+          reponame=${{ github.event.repository.name }}
+          sed -i "1s/^/# $reponame\nPlace client specific repository information here\n\n/" README.md
+        
+      - name: Save repository owner email
+        run: |
+          echo "owner_email=$(git log -n 1 --pretty=format:%ae )" >> $GITHUB_ENV
+       
+      - name: "Stage files and check for modified files"
+        id: git-check
+        run: |
+          git init
+          git config user.email "${{ env.owner_email }}"
+          git config user.name "${{ github.repository_owner }}"
+          git add .
+          echo "modified=$(if git diff-index --quiet HEAD --; then echo "false"; else echo "true"; fi)" >> $GITHUB_OUTPUT
+          
+      - name: "Commit and push if there modified files"
+        if: steps.git-check.outputs.modified == 'true'
+        run: |
+          git checkout main
+          git commit -m "HE Initial Setup ${{ github.event.inputs.commit_text }} on ${{ github.event.repository.updated_at }}"
+          echo "git-push=$(git push -u origin main)\n" >> $GITHUB_OUTPUT
+          git pull
+
+      - name: "Create environment branches"
+        if: steps.git-check.outputs.modified == 'true'
+        run: |
+          git fetch origin
+          git branch staging
+          git push -u origin staging
+          git branch uat
+          git push -u origin uat
+          git branch qa
+          git push -u origin qa
+  
+      - name: Disable this workflow
+        shell: bash
+        run: |
+          gh workflow disable -R $GITHUB_REPOSITORY "${{ github.workflow }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
